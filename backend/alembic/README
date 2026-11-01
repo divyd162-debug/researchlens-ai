@@ -1,0 +1,73 @@
+# ResearchLens AI - Database Migrations with Alembic
+
+This directory contains the database migration environment for ResearchLens AI using Alembic and SQLAlchemy.
+
+---
+
+## 1. What is a Migration?
+A **database migration** is version control for your database schema. Just as Git tracks changes to your source code over time, migrations track changes to tables, columns, indexes, and constraints.
+
+Each migration file in `versions/` represents a single incremental step:
+* **`upgrade()`**: Applies new changes (e.g. creating the `documents` table).
+* **`downgrade()`**: Reverses those exact changes (e.g. dropping the `documents` table).
+
+---
+
+## 2. Configuration & Credential Safety
+* **No hardcoded credentials:** `alembic.ini` does not contain database passwords.
+* **Environment-driven:** `alembic/env.py` reads `DATABASE_URL` directly from `app.core.config.settings` (your `.env` file).
+* **Command-line override:** You can also pass a connection string dynamically:
+  ```bash
+  alembic -x url="postgresql+psycopg://user:pass@host:5432/dbname" upgrade head
+  ```
+
+---
+
+## 3. Standard Migration Commands
+
+Run all commands from either the `backend/` directory or the repository root:
+
+### A. Creating a New Migration
+When you define or modify SQLAlchemy models in `app/models/`, generate a migration script:
+```bash
+# From backend directory:
+alembic revision --autogenerate -m "create documents and chunks tables"
+
+# Or from project root:
+alembic -c backend/alembic.ini revision --autogenerate -m "create documents and chunks tables"
+```
+> [!IMPORTANT]
+> **Always inspect the generated migration script** in `alembic/versions/` before applying it. Autogenerate detects table, column, and index changes, but cannot detect data transformations or custom constraints automatically.
+
+### B. Applying Migrations (Upgrading)
+Apply all pending migrations up to the latest revision:
+```bash
+alembic upgrade head
+```
+
+### C. Reversing Migrations (Downgrading)
+Roll back the last migration step:
+```bash
+alembic downgrade -1
+```
+Roll back all migrations to an empty database:
+```bash
+alembic downgrade base
+```
+
+### D. Checking Migration Status
+Check the current revision applied to the database:
+```bash
+alembic current
+```
+View the full timeline of revisions:
+```bash
+alembic history --verbose
+```
+
+### E. Dry Run / Offline SQL Generation
+Generate the raw SQL statements that would be executed without connecting to a live database:
+```bash
+alembic upgrade head --sql
+```
+This is useful for security audits and verifying SQL before running against production databases.
