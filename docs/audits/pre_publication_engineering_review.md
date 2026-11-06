@@ -2,7 +2,7 @@
 
 **Audit Date**: November 2026
 **Auditor**: Senior Software Engineer, Staff Backend Engineer, AI/ML Specialist & Security Reviewer
-**Target Repository**: `ResearchLens AI` (`/Users/divyadesai/Desktop/ResearchLens AI.`)
+**Target Repository**: `ResearchLens AI`
 **Commit Inspected**: `8e9346a12bd4ecba61b6282ccc5650c05c5fdf25` (`chore: initialize ResearchLens AI repository`)
 **Test Suite Verification (Batch 2 Baseline Post-Remediation)**:
 - Backend: **665 passed**, 1 skipped (`test_embedding_integration.py` real-model test), 6 deprecation warnings in 34.49s (Python 3.13.1, pytest 9.1.1)

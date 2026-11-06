@@ -1,7 +1,7 @@
 # ResearchLens AI 🔍📄
 
-[![Backend Tests](https://img.shields.io/badge/backend%20tests-665%20passed-brightgreen)](#testing-instructions)
-[![Frontend Tests](https://img.shields.io/badge/frontend%20tests-115%20passed-brightgreen)](#testing-instructions)
+[![Backend Tests](https://img.shields.io/badge/backend%20tests-675%20passed-brightgreen)](#testing-instructions)
+[![Frontend Tests](https://img.shields.io/badge/frontend%20tests-114%20passed-brightgreen)](#testing-instructions)
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](#prerequisites)
 [![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-green)](#prerequisites)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](#license)

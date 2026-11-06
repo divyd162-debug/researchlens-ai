@@ -34,7 +34,7 @@ from app.services.vector_store import VectorStore
 
 POSTGRES_TEST_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql+psycopg://divyadesai@localhost:5432/researchlens_test",
+    "postgresql+psycopg://postgres:postgres@localhost:5432/researchlens_test",
 )
 
 
