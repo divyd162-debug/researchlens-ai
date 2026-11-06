@@ -4,9 +4,8 @@
 [![Frontend Tests](https://img.shields.io/badge/frontend%20tests-114%20passed-brightgreen)](#testing-instructions)
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](#prerequisites)
 [![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-green)](#prerequisites)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 
-**ResearchLens AI** is an open-source, local-first research platform designed to parse scientific literature, perform dense semantic vector retrieval, and answer complex research questions with verifiable, passage-level citations grounded in original PDFs.
+**ResearchLens AI** is a local-first research platform designed to parse scientific literature, perform dense semantic vector retrieval, and answer complex research questions with verifiable, passage-level citations grounded in original PDFs.
 
 ---
 
@@ -382,4 +381,4 @@ npm run build
 
 ## 15. License
 
-This project is open-source software licensed under the [MIT License](LICENSE).
+License: No license has currently been assigned to this repository. The code is publicly viewable, but no permission to copy, modify, distribute, or reuse it is granted.
