@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for application startup and shutdown lifecycle."""
-    # 1. Eagerly validate security, JWT, and LLM configuration on server startup
+    # 1. Eagerly validate security, JWT, LLM, and document configuration on server startup
     settings.validate_jwt_settings()
     settings.validate_llm_settings()
+    settings.validate_document_settings()
 
     # 2. Worker concurrency safeguard: acquire advisory file lock
     lock = get_worker_lock(settings.DATA_DIR)
@@ -38,7 +39,14 @@ async def lifespan(app: FastAPI):
             active_llm.model_name,
         )
 
-        # 3. FAISS index verification and deterministic startup recovery
+        # 3. Clean up stale temporary upload files older than 1 hour from interrupted uploads
+        try:
+            from app.services.document_service import cleanup_stale_temp_files
+            cleanup_stale_temp_files(settings.UPLOAD_DIR)
+        except Exception as cleanup_exc:
+            logger.warning("Startup cleanup of stale temporary upload files failed: %s", cleanup_exc)
+
+        # 4. FAISS index verification and deterministic startup recovery
         try:
             verify_and_recover_vector_index()
         except Exception as exc:
@@ -63,6 +71,7 @@ def create_application() -> FastAPI:
     """
     settings.validate_jwt_settings()
     settings.validate_llm_settings()
+    settings.validate_document_settings()
 
     app = FastAPI(
         title=settings.PROJECT_NAME,
@@ -100,11 +109,70 @@ def create_application() -> FastAPI:
 
     @app.get("/health", tags=["General"])
     def health_check():
-        """Health check endpoint to verify backend service readiness."""
+        """Liveness check endpoint returning basic process health without external dependencies."""
         return {
             "status": "healthy",
             "environment": settings.ENVIRONMENT,
         }
+
+    @app.get("/health/ready", tags=["General"])
+    def readiness_check():
+        """Readiness check endpoint verifying database, vector store, and upload directory."""
+        from fastapi.responses import JSONResponse
+        from pathlib import Path
+
+        failures = []
+
+        # 1. Database readiness check (lightweight SELECT 1 with bounded connection)
+        try:
+            from sqlalchemy import text
+            from app.core.database import get_db, get_session_factory
+            if get_db in app.dependency_overrides:
+                override = app.dependency_overrides[get_db]
+                gen = override()
+                session = next(gen)
+                try:
+                    session.execute(text("SELECT 1"))
+                finally:
+                    try:
+                        next(gen)
+                    except StopIteration:
+                        pass
+            else:
+                factory = get_session_factory()
+                with factory() as session:
+                    session.execute(text("SELECT 1"))
+        except Exception as exc:
+            logger.warning("Readiness check: database dependency failure (%s)", type(exc).__name__)
+            failures.append("database")
+
+        # 2. Vector store readiness check (in-memory readiness flag without loading embedding model)
+        try:
+            from app.services.vector_store import get_vector_store
+            vs = get_vector_store()
+            if not vs.is_ready:
+                failures.append("vector_store")
+        except Exception as exc:
+            logger.warning("Readiness check: vector store dependency failure (%s)", type(exc).__name__)
+            failures.append("vector_store")
+
+        # 3. Upload directory readiness check (filesystem existence and permissions without test files)
+        try:
+            upload_path = Path(settings.UPLOAD_DIR)
+            if not (upload_path.exists() and upload_path.is_dir() and os.access(upload_path, os.R_OK | os.W_OK)):
+                failures.append("upload_directory")
+        except Exception as exc:
+            logger.warning("Readiness check: upload directory dependency failure (%s)", type(exc).__name__)
+            failures.append("upload_directory")
+
+        if failures:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "failures": failures},
+            )
+
+        return {"status": "ready"}
+
 
     return app
 

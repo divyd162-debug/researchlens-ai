@@ -79,6 +79,10 @@ class Settings:
     # Storage & Upload Configuration (Phase 5, Milestone 2)
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", DEFAULT_UPLOAD_DIR)
 
+    # Maximum allowed page count for uploaded PDF documents (default: 100 pages).
+    # Mitigates resource exhaustion and decompression DoS from oversized documents.
+    MAX_DOCUMENT_PAGES: int = int(os.getenv("MAX_DOCUMENT_PAGES", "100"))
+
     # Maximum allowed size for the PDF file payload itself (default: 25 MB = 26,214,400 bytes).
     # Enforced strictly by DocumentService during file streaming and database persistence.
     MAX_UPLOAD_SIZE_BYTES: int = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(25 * 1024 * 1024)))
@@ -101,6 +105,10 @@ class Settings:
     # In-flight documents (EXTRACTING, CHUNKING, EMBEDDING) older than this threshold are considered
     # stranded due to worker process crashes and are eligible for recovery/retry.
     STALE_INGESTION_TIMEOUT_SECONDS: int = int(os.getenv("STALE_INGESTION_TIMEOUT_SECONDS", "300"))
+
+    # Multi-turn conversational history configuration (Stage 2)
+    CHAT_MAX_HISTORY_TURNS: int = int(os.getenv("CHAT_MAX_HISTORY_TURNS", "10"))
+    CHAT_MAX_HISTORY_CHARS: int = int(os.getenv("CHAT_MAX_HISTORY_CHARS", "4000"))
 
     def __init__(self) -> None:
         self.reload(load_env=False)
@@ -130,6 +138,7 @@ class Settings:
         self.JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
         self.ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
         self.UPLOAD_DIR = os.getenv("UPLOAD_DIR", DEFAULT_UPLOAD_DIR)
+        self.MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "100"))
         self.MAX_UPLOAD_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(25 * 1024 * 1024)))
         self.MULTIPART_OVERHEAD_BYTES = int(os.getenv("MULTIPART_OVERHEAD_BYTES", str(256 * 1024)))
         self.MAX_REQUEST_BODY_SIZE_BYTES = int(
@@ -139,6 +148,8 @@ class Settings:
         self.VECTOR_INDEX_DIR = os.getenv("VECTOR_INDEX_DIR", DEFAULT_DATA_DIR)
         self.EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
         self.STALE_INGESTION_TIMEOUT_SECONDS = int(os.getenv("STALE_INGESTION_TIMEOUT_SECONDS", "300"))
+        self.CHAT_MAX_HISTORY_TURNS = int(os.getenv("CHAT_MAX_HISTORY_TURNS", "10"))
+        self.CHAT_MAX_HISTORY_CHARS = int(os.getenv("CHAT_MAX_HISTORY_CHARS", "4000"))
 
     def get_jwt_secret_key(self) -> str:
         """Returns the effective JWT secret key with strict environment validation.
@@ -247,6 +258,21 @@ class Settings:
         raise LLMConfigurationError(
             f"Unsupported LLM_PROVIDER '{provider}'. Supported providers: ['mock', 'omniroute']."
         )
+
+    def validate_document_settings(self) -> None:
+        """Validates document upload configuration settings.
+
+        Raises:
+            ValueError: If MAX_DOCUMENT_PAGES or MAX_UPLOAD_SIZE_BYTES is not positive.
+        """
+        if self.MAX_DOCUMENT_PAGES <= 0:
+            raise ValueError(
+                f"MAX_DOCUMENT_PAGES must be a positive integer, got {self.MAX_DOCUMENT_PAGES}."
+            )
+        if self.MAX_UPLOAD_SIZE_BYTES <= 0:
+            raise ValueError(
+                f"MAX_UPLOAD_SIZE_BYTES must be a positive integer, got {self.MAX_UPLOAD_SIZE_BYTES}."
+            )
 
 
 settings = Settings()

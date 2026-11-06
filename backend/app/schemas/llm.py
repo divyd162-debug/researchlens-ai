@@ -18,12 +18,37 @@ class LLMChunkContext(BaseModel):
         return v.strip()
 
 
+class ChatMessageItem(BaseModel):
+    """Dialogue message item within conversation history for multi-turn context."""
+    role: str = Field(..., description="Message role: 'user', 'assistant', or 'system'")
+    content: str = Field(..., min_length=1, description="Message text content")
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        v_clean = str(v).strip().lower()
+        if v_clean not in ("user", "assistant", "system"):
+            raise ValueError("Role must be 'user', 'assistant', or 'system'")
+        return v_clean
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Content must contain non-whitespace characters")
+        return v.strip()
+
+
 class LLMRequest(BaseModel):
     """Standardized request payload passed to an LLM provider."""
     prompt: str = Field(..., min_length=1, description="User query or instruction")
     context_chunks: List[LLMChunkContext] = Field(
         default_factory=list,
         description="List of retrieved passage contexts to be referenced in the answer",
+    )
+    conversation_history: List[ChatMessageItem] = Field(
+        default_factory=list,
+        description="Chronological prior dialogue turns providing context for multi-turn conversations",
     )
     system_instruction: Optional[str] = Field(
         default=None,

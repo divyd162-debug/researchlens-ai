@@ -9,12 +9,15 @@ from sqlalchemy.orm import Session
 
 from app.models.chat import ChatSession
 from app.models.collection import Collection, CollectionDocument
+from app.models.document import Document
 from app.schemas.collection import (
+    AddDocumentsToCollectionRequest,
     CollectionCreateRequest,
     CollectionListResponse,
     CollectionResponse,
     CollectionUpdateRequest,
 )
+from app.schemas.document import DocumentListResponse, DocumentResponse
 
 
 class CollectionServiceError(Exception):
@@ -34,6 +37,16 @@ class DuplicateCollectionNameError(CollectionServiceError):
 
 class InvalidCollectionNameError(CollectionServiceError):
     """Raised when a collection name fails validation rules."""
+    pass
+
+
+class DocumentNotFoundError(CollectionServiceError):
+    """Raised when a document does not exist or does not belong to the user."""
+    pass
+
+
+class AssociationNotFoundError(CollectionServiceError):
+    """Raised when a document is not associated with the collection."""
     pass
 
 
@@ -356,6 +369,212 @@ class CollectionService:
         except Exception:
             db.rollback()
             raise
+
+    def add_documents_to_collection(
+        self,
+        db: Session,
+        owner_id: UUID,
+        collection_id: UUID,
+        request: Union[AddDocumentsToCollectionRequest, Dict[str, Any]],
+    ) -> CollectionResponse:
+        """Associates one or more documents owned by owner_id with collection_id.
+
+        Atomicity & Validation:
+        - Collection must exist and be owned by owner_id.
+        - Every requested document must exist and be owned by owner_id.
+        - If any document is not found or not owned by the caller, the operation aborts
+          cleanly with DocumentNotFoundError without making partial associations.
+        - Duplicate memberships are safely and idempotently handled.
+        - Documents in any processing state (e.g. PENDING, PROCESSING, READY) can be associated
+          for organization; retrieval strictly queries only chunks from READY documents.
+
+        Returns:
+            CollectionResponse with updated document_count.
+        """
+        if isinstance(request, dict):
+            req = AddDocumentsToCollectionRequest.model_validate(request)
+        elif isinstance(request, AddDocumentsToCollectionRequest):
+            req = request
+        else:
+            raise ValueError(f"Expected AddDocumentsToCollectionRequest or dict, got {type(request).__name__}")
+
+        collection = (
+            db.query(Collection)
+            .filter(Collection.id == collection_id, Collection.owner_id == owner_id)
+            .first()
+        )
+        if collection is None:
+            raise CollectionNotFoundError("Collection not found.")
+
+        unique_doc_ids = list(dict.fromkeys(req.document_ids))
+        if not unique_doc_ids:
+            raise ValueError("At least one document ID must be provided.")
+
+        # Verify all documents exist and belong to the authenticated owner
+        found_docs = (
+            db.query(Document)
+            .filter(Document.id.in_(unique_doc_ids), Document.owner_id == owner_id)
+            .all()
+        )
+        found_doc_ids = {d.id for d in found_docs}
+        if len(found_doc_ids) != len(unique_doc_ids):
+            raise DocumentNotFoundError("One or more documents not found.")
+
+        # Find existing associations to prevent duplicate primary key insertion
+        existing_assocs = (
+            db.query(CollectionDocument.document_id)
+            .filter(
+                CollectionDocument.collection_id == collection.id,
+                CollectionDocument.document_id.in_(unique_doc_ids),
+            )
+            .all()
+        )
+        already_associated_ids = {row[0] for row in existing_assocs}
+        new_ids_to_add = [did for did in unique_doc_ids if did not in already_associated_ids]
+
+        if new_ids_to_add:
+            for did in new_ids_to_add:
+                db.add(CollectionDocument(collection_id=collection.id, document_id=did))
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+            except Exception:
+                db.rollback()
+                raise
+
+        doc_count = (
+            db.query(func.count(CollectionDocument.document_id))
+            .filter(CollectionDocument.collection_id == collection.id)
+            .scalar()
+            or 0
+        )
+        db.refresh(collection)
+
+        return CollectionResponse(
+            id=collection.id,
+            name=collection.name,
+            description=collection.description,
+            document_count=doc_count,
+            created_at=collection.created_at,
+            updated_at=collection.updated_at,
+        )
+
+    def remove_document_from_collection(
+        self,
+        db: Session,
+        owner_id: UUID,
+        collection_id: UUID,
+        document_id: UUID,
+    ) -> CollectionResponse:
+        """Removes a document association from a collection without deleting the underlying document.
+
+        Verification:
+        - Collection must exist and be owned by owner_id.
+        - Document must exist and be owned by owner_id.
+        - Association between collection and document must exist.
+
+        Returns:
+            CollectionResponse with updated document_count.
+        """
+        collection = (
+            db.query(Collection)
+            .filter(Collection.id == collection_id, Collection.owner_id == owner_id)
+            .first()
+        )
+        if collection is None:
+            raise CollectionNotFoundError("Collection not found.")
+
+        document = (
+            db.query(Document)
+            .filter(Document.id == document_id, Document.owner_id == owner_id)
+            .first()
+        )
+        if document is None:
+            raise DocumentNotFoundError("Document not found.")
+
+        assoc = (
+            db.query(CollectionDocument)
+            .filter(
+                CollectionDocument.collection_id == collection.id,
+                CollectionDocument.document_id == document.id,
+            )
+            .first()
+        )
+        if assoc is None:
+            raise AssociationNotFoundError("Document is not a member of this collection.")
+
+        db.delete(assoc)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+        doc_count = (
+            db.query(func.count(CollectionDocument.document_id))
+            .filter(CollectionDocument.collection_id == collection.id)
+            .scalar()
+            or 0
+        )
+        db.refresh(collection)
+
+        return CollectionResponse(
+            id=collection.id,
+            name=collection.name,
+            description=collection.description,
+            document_count=doc_count,
+            created_at=collection.created_at,
+            updated_at=collection.updated_at,
+        )
+
+    def list_collection_documents(
+        self,
+        db: Session,
+        owner_id: UUID,
+        collection_id: UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> DocumentListResponse:
+        """Lists member documents of a collection owned by owner_id with pagination.
+
+        Verification:
+        - Collection must exist and be owned by owner_id.
+
+        Returns:
+            DocumentListResponse with items, total count, limit, and offset.
+        """
+        collection = (
+            db.query(Collection)
+            .filter(Collection.id == collection_id, Collection.owner_id == owner_id)
+            .first()
+        )
+        if collection is None:
+            raise CollectionNotFoundError("Collection not found.")
+
+        base_query = (
+            db.query(Document)
+            .join(CollectionDocument, CollectionDocument.document_id == Document.id)
+            .filter(
+                CollectionDocument.collection_id == collection.id,
+                Document.owner_id == owner_id,
+            )
+        )
+        total = base_query.count()
+        documents = (
+            base_query.order_by(CollectionDocument.added_at.desc(), Document.id.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        items = [DocumentResponse.model_validate(doc) for doc in documents]
+        return DocumentListResponse(
+            items=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
 
 # Singleton instance

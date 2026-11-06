@@ -5,10 +5,24 @@ import threading
 from typing import List, Optional, Union
 import numpy as np
 
-# In local/test/offline environments, prefer local HuggingFace cache to prevent network retry latencies
-if os.getenv("ENVIRONMENT", "development").lower() in ("test", "testing", "development"):
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+def configure_hf_offline_mode() -> None:
+    """Configures HuggingFace and Transformers offline environment settings.
+
+    Rules:
+    - If HF_HUB_OFFLINE or TRANSFORMERS_OFFLINE is explicitly configured in the environment
+      (e.g. "1", "0", "true", "false"), that explicit configuration is strictly preserved.
+    - In test/testing environments (ENVIRONMENT in ('test', 'testing')), offline mode is
+      enabled by default to prevent unit tests from making unexpected outbound network requests.
+    - In development and production environments, offline mode is NOT forced by default,
+      allowing SentenceTransformers to download model weights on initial launch if not cached.
+    """
+    env = (os.getenv("ENVIRONMENT") or "").strip().lower()
+    if env in ("test", "testing"):
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
+
+configure_hf_offline_mode()
 
 
 class EmbeddingServiceError(Exception):

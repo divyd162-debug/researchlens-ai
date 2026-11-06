@@ -32,6 +32,11 @@ export interface CollectionCreateRequest {
   description?: string | null
 }
 
+export interface AddDocumentsToCollectionRequest {
+  document_ids?: string[]
+  document_id?: string
+}
+
 export interface CollectionResponse {
   id: string
   name: string
@@ -71,7 +76,110 @@ export interface MessageResponse {
   message: string
 }
 
-export type SearchScopeType = 'GLOBAL' | 'DOCUMENT' | 'COLLECTION' | 'DOCUMENTS'
+export type SearchScopeType = 'GLOBAL' | 'DOCUMENT' | 'COLLECTION' | 'DOCUMENTS' | 'global' | 'document' | 'collection' | 'documents'
+
+export type DocumentStatus = 'pending' | 'extracting' | 'chunking' | 'embedding' | 'ready' | 'failed'
+
+export interface DocumentItem {
+  id: string
+  title: string
+  filename: string
+  pageCount: number
+  fileSizeBytes: number
+  status: DocumentStatus
+  statusMessage?: string
+  uploadedAt: string
+  authors: string[]
+  doi?: string
+  year: number
+  abstract: string
+  collectionIds: string[]
+  chunkCount?: number
+  topics: string[]
+}
+
+export interface CollectionItem {
+  id: string
+  name: string
+  description: string
+  documentCount: number
+  createdAt: string
+  updatedAt: string
+  documentIds: string[]
+  colorTheme?: string
+}
+
+export interface SearchScope {
+  type: SearchScopeType
+  targetId?: string
+  targetName?: string
+  selectedDocIds?: string[]
+}
+
+export interface SearchResult {
+  id: string
+  documentId: string
+  documentTitle: string
+  page: number
+  passage: string
+  matchedKeywords: string[]
+  sectionTitle?: string
+  doi?: string
+  year: number
+  authors: string[]
+}
+
+export interface Citation {
+  id: string
+  documentId: string
+  documentTitle: string
+  page: number
+  quotedPassage: string
+  sectionTitle?: string
+  doi?: string
+  authors?: string[]
+  year?: number
+  charStart?: number
+  charEnd?: number
+}
+
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
+  citations?: Citation[]
+  scope?: SearchScope
+}
+
+export interface ChatSession {
+  id: string
+  title: string
+  createdAt: string
+  updatedAt: string
+  scope: SearchScope
+  messages: ChatMessage[]
+  isArchived?: boolean
+}
+
+export interface ResearchActivity {
+  id: string
+  type: 'search' | 'chat' | 'upload'
+  title: string
+  timestamp: string
+  scopeDescription: string
+  linkTab: 'search' | 'chat' | 'documents'
+  linkId?: string
+}
+
+export interface OverviewMetrics {
+  totalDocuments: number
+  totalCollections: number
+  totalConversations: number
+  processingDocuments: number
+  storageUsedBytes: number
+  storageMaxBytes: number
+}
 
 export interface SearchRequest {
   query: string
@@ -103,7 +211,42 @@ export interface SearchResponse {
   results: SearchPassageResponse[]
 }
 
-export type ActiveView = 'dashboard' | 'collections' | 'documents' | 'search' | 'chat' | 'login' | 'register'
+export interface CitationSnapshot {
+  chunk_id: number
+  document_id: string
+  quoted_text: string
+  page_number: number
+  document_title: string
+  similarity_score: number
+  citation_frequency: number
+}
+
+export interface QueryRequest {
+  query: string
+  scope_type?: ChatScopeType
+  scope_id?: string | null
+  document_ids?: string[] | null
+  top_k?: number
+  similarity_threshold?: number
+}
+
+export interface RAGResponse {
+  query: string
+  answer: string
+  citations: CitationSnapshot[]
+  unknown_chunk_ids: number[]
+  malformed_markers: string[]
+  unsupported_numbers: string[]
+  status: 'SUCCESS' | 'NO_RELEVANT_CONTEXT' | string
+  model_name: string
+  provider_name: string
+  retrieved_chunk_count: number
+  prompt_tokens?: number | null
+  completion_tokens?: number | null
+  total_tokens?: number | null
+}
+
+export type ActiveView = 'dashboard' | 'collections' | 'documents' | 'search' | 'chat' | 'login' | 'register' | 'explore' | 'studio' | 'settings' | 'mcp'
 
 export type ChatScopeType = 'GLOBAL' | 'DOCUMENT' | 'COLLECTION' | 'DOCUMENTS'
 export type SenderType = 'USER' | 'ASSISTANT' | 'SYSTEM'

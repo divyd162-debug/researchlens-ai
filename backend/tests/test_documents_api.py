@@ -907,3 +907,203 @@ class TestRequestSizeLimitMiddleware:
         assert response.status_code == 413
         assert "File size exceeds maximum allowed limit of 5000 bytes." in response.json()["detail"]
 
+    def test_pdf_at_or_below_page_limit_succeeds(
+        self, client: TestClient, auth_headers_a: dict, test_upload_dir: Path
+    ):
+        """Proves that a PDF with exactly MAX_DOCUMENT_PAGES (default 100) is accepted."""
+        pdf_100 = create_sample_pdf_bytes([f"Page {i}" for i in range(100)])
+        response = client.post(
+            "/api/v1/documents",
+            headers=auth_headers_a,
+            files={"file": ("exact_100.pdf", pdf_100, "application/pdf")},
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["page_count"] == 100
+
+    def test_pdf_exceeding_page_limit_rejected_and_cleans_up(
+        self, client: TestClient, auth_headers_a: dict, db_session: Session, test_upload_dir: Path
+    ):
+        """Proves that a PDF exceeding MAX_DOCUMENT_PAGES is rejected with 400 and cleans up temp files."""
+        pdf_101 = create_sample_pdf_bytes([f"Page {i}" for i in range(101)])
+        response = client.post(
+            "/api/v1/documents",
+            headers=auth_headers_a,
+            files={"file": ("too_many_pages.pdf", pdf_101, "application/pdf")},
+        )
+        assert response.status_code == 400
+        assert "Document exceeds maximum allowed limit of 100 pages (got 101)." in response.json()["detail"]
+
+        # Ensure no orphaned temp files or uploaded PDFs remain in upload directory
+        assert list(test_upload_dir.glob("*.tmp")) == []
+        assert list(test_upload_dir.glob("*.pdf")) == []
+
+        # Ensure no document row was written to database
+        assert db_session.query(Document).count() == 0
+
+    def test_pdf_page_limit_configurable_via_settings(
+        self, client: TestClient, auth_headers_a: dict, monkeypatch, test_upload_dir: Path
+    ):
+        """Proves that MAX_DOCUMENT_PAGES limit is dynamically configurable."""
+        monkeypatch.setattr(settings, "MAX_DOCUMENT_PAGES", 5)
+
+        pdf_6 = create_sample_pdf_bytes([f"Page {i}" for i in range(6)])
+        response = client.post(
+            "/api/v1/documents",
+            headers=auth_headers_a,
+            files={"file": ("six_pages.pdf", pdf_6, "application/pdf")},
+        )
+        assert response.status_code == 400
+        assert "Document exceeds maximum allowed limit of 5 pages (got 6)." in response.json()["detail"]
+
+        pdf_5 = create_sample_pdf_bytes([f"Page {i}" for i in range(5)])
+        response_ok = client.post(
+            "/api/v1/documents",
+            headers=auth_headers_a,
+            files={"file": ("five_pages.pdf", pdf_5, "application/pdf")},
+        )
+        assert response_ok.status_code == 201
+        assert response_ok.json()["page_count"] == 5
+
+    def test_document_settings_validation(self, monkeypatch):
+        """Verifies that validate_document_settings rejects zero or negative configuration."""
+        settings.validate_document_settings()  # Should succeed with defaults
+
+        monkeypatch.setattr(settings, "MAX_DOCUMENT_PAGES", 0)
+        with pytest.raises(ValueError, match="MAX_DOCUMENT_PAGES must be a positive integer"):
+            settings.validate_document_settings()
+
+        monkeypatch.setattr(settings, "MAX_DOCUMENT_PAGES", -5)
+        with pytest.raises(ValueError, match="MAX_DOCUMENT_PAGES must be a positive integer"):
+            settings.validate_document_settings()
+
+        monkeypatch.setattr(settings, "MAX_DOCUMENT_PAGES", 100)
+        monkeypatch.setattr(settings, "MAX_UPLOAD_SIZE_BYTES", 0)
+        with pytest.raises(ValueError, match="MAX_UPLOAD_SIZE_BYTES must be a positive integer"):
+            settings.validate_document_settings()
+
+
+class TestStaleTemporaryFileCleanup:
+    """Test suite for cleanup_stale_temp_files utility."""
+
+    def test_cleanup_stale_tmp_files_removed(self, tmp_path: Path):
+        """Verifies that .tmp files older than max_age_seconds are safely removed."""
+        import os
+        import time
+        from app.services.document_service import cleanup_stale_temp_files
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir()
+
+        stale_file = upload_dir / "stale_upload.tmp"
+        stale_file.write_bytes(b"%PDF-sample")
+        # Set mtime to 2 hours ago
+        stale_mtime = time.time() - 7200
+        os.utime(stale_file, (stale_mtime, stale_mtime))
+
+        purged = cleanup_stale_temp_files(upload_dir, max_age_seconds=3600)
+        assert purged == 1
+        assert not stale_file.exists()
+
+    def test_cleanup_recent_tmp_files_preserved(self, tmp_path: Path):
+        """Verifies that .tmp files newer than max_age_seconds are preserved."""
+        import os
+        import time
+        from app.services.document_service import cleanup_stale_temp_files
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir()
+
+        recent_file = upload_dir / "recent_upload.tmp"
+        recent_file.write_bytes(b"%PDF-sample")
+        # Set mtime to 60 seconds ago (< 1 hour)
+        recent_mtime = time.time() - 60
+        os.utime(recent_file, (recent_mtime, recent_mtime))
+
+        purged = cleanup_stale_temp_files(upload_dir, max_age_seconds=3600)
+        assert purged == 0
+        assert recent_file.exists()
+
+    def test_cleanup_preserves_pdfs_gitkeep_and_subdirectories(self, tmp_path: Path):
+        """Verifies that .pdf files, .gitkeep, and directories are never deleted, even if old."""
+        import os
+        import time
+        from app.services.document_service import cleanup_stale_temp_files
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir()
+
+        old_pdf = upload_dir / "research_doc.pdf"
+        old_pdf.write_bytes(b"%PDF-valid-research-paper")
+        old_gitkeep = upload_dir / ".gitkeep"
+        old_gitkeep.write_bytes(b"keep")
+        sub_dir = upload_dir / "subdir"
+        sub_dir.mkdir()
+
+        # Set all mtimes to 30 days ago
+        ancient_mtime = time.time() - (86400 * 30)
+        os.utime(old_pdf, (ancient_mtime, ancient_mtime))
+        os.utime(old_gitkeep, (ancient_mtime, ancient_mtime))
+
+        purged = cleanup_stale_temp_files(upload_dir, max_age_seconds=3600)
+        assert purged == 0
+        assert old_pdf.exists()
+        assert old_gitkeep.exists()
+        assert sub_dir.exists()
+
+    def test_cleanup_ignores_symlinks(self, tmp_path: Path):
+        """Verifies that symlinks are strictly skipped and never deleted or followed."""
+        import os
+        import time
+        from app.services.document_service import cleanup_stale_temp_files
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir()
+        external_dir = tmp_path / "external"
+        external_dir.mkdir()
+
+        target_file = external_dir / "external_target.tmp"
+        target_file.write_bytes(b"external")
+        old_mtime = time.time() - 7200
+        os.utime(target_file, (old_mtime, old_mtime))
+
+        symlink_file = upload_dir / "symlinked.tmp"
+        try:
+            symlink_file.symlink_to(target_file)
+        except (OSError, NotImplementedError):
+            pytest.skip("Symlinks not supported on this platform/filesystem.")
+
+        purged = cleanup_stale_temp_files(upload_dir, max_age_seconds=3600)
+        assert purged == 0
+        assert symlink_file.is_symlink()
+        assert target_file.exists()
+
+    def test_cleanup_handles_filesystem_permission_errors_gracefully(self, tmp_path: Path, monkeypatch):
+        """Verifies that unexpected filesystem errors do not raise or crash application startup."""
+        from app.services.document_service import cleanup_stale_temp_files
+
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir()
+
+        def mock_iterdir(_self):
+            raise PermissionError("Access denied to upload directory")
+
+        monkeypatch.setattr(Path, "iterdir", mock_iterdir)
+
+        # Should log a warning and return 0 without raising
+        purged = cleanup_stale_temp_files(upload_dir, max_age_seconds=3600)
+        assert purged == 0
+
+    def test_cleanup_nonexistent_or_invalid_directory_returns_zero(self, tmp_path: Path):
+        """Verifies that nonexistent directory or regular file path safely returns 0."""
+        from app.services.document_service import cleanup_stale_temp_files
+
+        # Nonexistent path
+        nonexistent = tmp_path / "does_not_exist"
+        assert cleanup_stale_temp_files(nonexistent) == 0
+
+        # Regular file instead of directory
+        reg_file = tmp_path / "file.txt"
+        reg_file.write_text("hello")
+        assert cleanup_stale_temp_files(reg_file) == 0
+

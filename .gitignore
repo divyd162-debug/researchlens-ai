@@ -84,3 +84,14 @@ data/*
 !data/uploads/
 data/uploads/*
 !data/uploads/.gitkeep
+
+# External templates & design artifacts
+templates/
+frontend/public/assets/aistudio/
+frontend/src/components/FestivalBanner.tsx
+frontend/src/components/CommunityGrid.tsx
+frontend/src/components/Header.tsx
+frontend/src/components/ModelGrid.tsx
+frontend/src/components/RecreateModal.tsx
+frontend/src/components/ReelsPresets.tsx
+frontend/src/data/higgsfieldData.ts

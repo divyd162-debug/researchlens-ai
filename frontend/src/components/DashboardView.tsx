@@ -60,6 +60,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         </div>
       ) : null}
 
+      <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-indigo-50 to-slate-50 border border-indigo-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-xs shrink-0">
+            RL
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <span>ResearchLens Studio Workspace</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">NEW PRO</span>
+            </h3>
+            <p className="text-xs text-slate-500">
+              Interactive split-pane with citation inspector drawer, ⌘K command palette, and local mock/FastAPI dual-mode.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => onNavigate('studio')}
+          className="px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer"
+        >
+          <span>Open Studio Workspace</span>
+          <span>&rarr;</span>
+        </button>
+      </div>
+
       <div className="metrics-grid">
         <div className="metric-card" onClick={() => onNavigate('collections')} role="button" tabIndex={0}>
           <div className="metric-icon">📁</div>

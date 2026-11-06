@@ -15,6 +15,8 @@ import {
   DocumentListResponse,
   DocumentResponse,
   MessageResponse,
+  QueryRequest,
+  RAGResponse,
   SearchRequest,
   SearchResponse,
   TokenResponse,
@@ -24,7 +26,27 @@ import {
 } from '../types'
 
 const TOKEN_STORAGE_KEY = 'researchlens_access_token'
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+
+export const normalizeBaseUrl = (rawBase?: string | null): string => {
+  if (!rawBase || !rawBase.trim()) {
+    return '/api/v1'
+  }
+  let base = rawBase.trim().replace(/\/+$/, '')
+  if (!base.endsWith('/api/v1')) {
+    if (base.endsWith('/api')) {
+      base = `${base}/v1`
+    } else {
+      base = `${base}/api/v1`
+    }
+  }
+  return base
+}
+
+export const buildApiUrl = (endpoint: string, baseUrl?: string): string => {
+  const base = normalizeBaseUrl(baseUrl ?? (import.meta.env.VITE_API_BASE_URL as string | undefined))
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+  return `${base}${cleanEndpoint}`
+}
 
 let unauthorizedCallback: (() => void) | null = null
 
@@ -69,7 +91,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint}`
+  const url = buildApiUrl(endpoint)
   const headers = new Headers(options.headers || {})
 
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
@@ -159,6 +181,38 @@ export const api = {
         body: JSON.stringify(payload),
       })
     },
+
+    addDocuments: async (
+      collectionId: string,
+      payload: { document_ids?: string[]; document_id?: string }
+    ): Promise<CollectionResponse> => {
+      return request<CollectionResponse>(`/collections/${collectionId}/documents`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+    },
+
+    removeDocument: async (
+      collectionId: string,
+      documentId: string
+    ): Promise<CollectionResponse> => {
+      return request<CollectionResponse>(`/collections/${collectionId}/documents/${documentId}`, {
+        method: 'DELETE',
+      })
+    },
+
+    listDocuments: async (
+      collectionId: string,
+      limit = 50,
+      offset = 0
+    ): Promise<DocumentListResponse> => {
+      return request<DocumentListResponse>(
+        `/collections/${collectionId}/documents?limit=${limit}&offset=${offset}`,
+        {
+          method: 'GET',
+        }
+      )
+    },
   },
 
   documents: {
@@ -185,11 +239,27 @@ export const api = {
         method: 'DELETE',
       })
     },
+
+    retry: async (id: string): Promise<DocumentResponse> => {
+      return request<DocumentResponse>(`/documents/${id}/retry`, {
+        method: 'POST',
+      })
+    },
   },
 
   search: {
     query: async (payload: SearchRequest, signal?: AbortSignal): Promise<SearchResponse> => {
       return request<SearchResponse>('/search', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal,
+      })
+    },
+  },
+
+  query: {
+    rag: async (payload: QueryRequest, signal?: AbortSignal): Promise<RAGResponse> => {
+      return request<RAGResponse>('/query', {
         method: 'POST',
         body: JSON.stringify(payload),
         signal,

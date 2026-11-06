@@ -1,30 +1,32 @@
-/* ResearchLens AI Application Shell Styles */
+/* ResearchLens AI Application Shell Styles — Higgsfield Aesthetic */
 
 :root {
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --bg-page: #f8fafc;
+  --primary: #18181b;
+  --primary-hover: #27272a;
+  --accent-lime: #c8fa00;
+  --accent-lime-hover: #b8f000;
+  --bg-page: #fafafb;
   --bg-card: #ffffff;
-  --text-main: #0f172a;
-  --text-muted: #64748b;
-  --border-color: #e2e8f0;
-  --border-focus: #3b82f6;
+  --text-main: #18181b;
+  --text-muted: #71717a;
+  --border-color: #e4e4e7;
+  --border-focus: #18181b;
   --error-bg: #fef2f2;
   --error-text: #991b1b;
   --error-border: #fecaca;
-  --info-bg: #f0f9ff;
-  --info-text: #075985;
-  --info-border: #bae6fd;
+  --info-bg: #f4f4f5;
+  --info-text: #18181b;
+  --info-border: #e4e4e7;
   --warning-bg: #fffbeb;
   --warning-text: #92400e;
   --warning-border: #fde68a;
-  --success-bg: #ecfdf5;
-  --success-text: #065f46;
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --success-bg: #f0fdf4;
+  --success-text: #166534;
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.08);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
 }
 
 /* Layout */
@@ -43,6 +45,11 @@
   margin: 0 auto;
   padding: 2rem 1.5rem;
   box-sizing: border-box;
+}
+
+.app-main-full {
+  max-width: 100% !important;
+  padding: 0 !important;
 }
 
 /* Navbar */

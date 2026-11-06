@@ -187,3 +187,64 @@ class TestEmbeddingServiceErrorHandling:
         """Verifies max_seq_length is correctly exposed from loaded model."""
         service = EmbeddingService()
         assert service.max_seq_length == 256
+
+
+class TestHuggingFaceOfflineConfiguration:
+    """Tests for HuggingFace and Transformers offline configuration (COMPAT-02)."""
+
+    def test_test_environment_sets_offline_flags(self, monkeypatch):
+        """Verifies ENVIRONMENT=test enables offline flags by default."""
+        import os
+        from app.services.embedding_service import configure_hf_offline_mode
+
+        monkeypatch.setenv("ENVIRONMENT", "test")
+        monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+        monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+
+        configure_hf_offline_mode()
+
+        assert os.environ.get("HF_HUB_OFFLINE") == "1"
+        assert os.environ.get("TRANSFORMERS_OFFLINE") == "1"
+
+    def test_development_environment_does_not_force_offline(self, monkeypatch):
+        """Verifies ENVIRONMENT=development does not force offline flags, allowing model downloads."""
+        import os
+        from app.services.embedding_service import configure_hf_offline_mode
+
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+        monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+
+        configure_hf_offline_mode()
+
+        assert "HF_HUB_OFFLINE" not in os.environ
+        assert "TRANSFORMERS_OFFLINE" not in os.environ
+
+    def test_explicitly_configured_offline_flags_preserved_in_development(self, monkeypatch):
+        """Verifies user-configured offline flags are strictly preserved in development."""
+        import os
+        from app.services.embedding_service import configure_hf_offline_mode
+
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+        monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
+
+        configure_hf_offline_mode()
+
+        assert os.environ.get("HF_HUB_OFFLINE") == "1"
+        assert os.environ.get("TRANSFORMERS_OFFLINE") == "1"
+
+    def test_explicitly_configured_online_flag_preserved_in_test(self, monkeypatch):
+        """Verifies explicit user preference (e.g. HF_HUB_OFFLINE=0) is preserved via setdefault."""
+        import os
+        from app.services.embedding_service import configure_hf_offline_mode
+
+        monkeypatch.setenv("ENVIRONMENT", "test")
+        monkeypatch.setenv("HF_HUB_OFFLINE", "0")
+        monkeypatch.setenv("TRANSFORMERS_OFFLINE", "0")
+
+        configure_hf_offline_mode()
+
+        # setdefault does not overwrite pre-existing env vars
+        assert os.environ.get("HF_HUB_OFFLINE") == "0"
+        assert os.environ.get("TRANSFORMERS_OFFLINE") == "0"

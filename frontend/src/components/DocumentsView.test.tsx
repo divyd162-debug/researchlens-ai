@@ -261,4 +261,156 @@ describe('DocumentsView Component', () => {
       expect(screen.getByText('Attention Is All You Need')).toBeDefined()
     })
   })
+
+  describe('Add to Collection workflow', () => {
+    it('opens AddToCollectionModal and displays collections dropdown', async () => {
+      vi.spyOn(api.collections, 'list').mockResolvedValueOnce({
+        items: [
+          {
+            id: 'col-1',
+            name: 'ML Papers',
+            description: 'Machine learning',
+            document_count: 2,
+            created_at: '2026-10-18T10:00:00Z',
+            updated_at: '2026-10-18T10:00:00Z',
+          },
+        ],
+        total: 1,
+        limit: 100,
+        offset: 0,
+      })
+
+      render(<DocumentsView />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Attention Is All You Need')).toBeDefined()
+      })
+
+      const addBtn = screen.getByRole('button', { name: 'Add Attention Is All You Need to collection' })
+      fireEvent.click(addBtn)
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: 'Add to Collection' })).toBeDefined()
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText(/ML Papers \(2 docs\)/i)).toBeDefined()
+      })
+
+      expect(screen.getByRole('button', { name: 'Add to Collection' })).toBeDefined()
+    })
+
+    it('successfully adds document to collection and shows success state', async () => {
+      vi.spyOn(api.collections, 'list').mockResolvedValueOnce({
+        items: [
+          {
+            id: 'col-1',
+            name: 'ML Papers',
+            description: 'Machine learning',
+            document_count: 2,
+            created_at: '2026-10-18T10:00:00Z',
+            updated_at: '2026-10-18T10:00:00Z',
+          },
+        ],
+        total: 1,
+        limit: 100,
+        offset: 0,
+      })
+      vi.spyOn(api.collections, 'addDocuments').mockResolvedValueOnce({
+        id: 'col-1',
+        name: 'ML Papers',
+        description: 'Machine learning',
+        document_count: 3,
+        created_at: '2026-10-18T10:00:00Z',
+        updated_at: '2026-10-18T10:00:00Z',
+      })
+
+      render(<DocumentsView />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Attention Is All You Need')).toBeDefined()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add Attention Is All You Need to collection' }))
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Add to Collection' })).toBeDefined()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add to Collection' }))
+
+      await waitFor(() => {
+        expect(api.collections.addDocuments).toHaveBeenCalledWith('col-1', {
+          document_ids: ['doc-uuid-1'],
+        })
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText(/Document added to collection successfully!/i)).toBeDefined()
+      })
+    })
+
+    it('shows informative message when no collections exist', async () => {
+      vi.spyOn(api.collections, 'list').mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        limit: 100,
+        offset: 0,
+      })
+
+      render(<DocumentsView />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Attention Is All You Need')).toBeDefined()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add Attention Is All You Need to collection' }))
+
+      await waitFor(() => {
+        expect(screen.getByText(/You have not created any collections yet/i)).toBeDefined()
+      })
+
+      const submitBtn = screen.getByRole('button', { name: 'Add to Collection' })
+      expect((submitBtn as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it('displays error in modal when addDocuments API call fails', async () => {
+      vi.spyOn(api.collections, 'list').mockResolvedValueOnce({
+        items: [
+          {
+            id: 'col-1',
+            name: 'ML Papers',
+            description: null,
+            document_count: 0,
+            created_at: '2026-10-18T10:00:00Z',
+            updated_at: '2026-10-18T10:00:00Z',
+          },
+        ],
+        total: 1,
+        limit: 100,
+        offset: 0,
+      })
+      vi.spyOn(api.collections, 'addDocuments').mockRejectedValueOnce(
+        new ApiError(404, 'Collection not found.')
+      )
+
+      render(<DocumentsView />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Attention Is All You Need')).toBeDefined()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add Attention Is All You Need to collection' }))
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Add to Collection' })).toBeDefined()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add to Collection' }))
+
+      await waitFor(() => {
+        expect(screen.getByText('Collection not found.')).toBeDefined()
+      })
+    })
+  })
 })

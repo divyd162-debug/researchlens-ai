@@ -3,6 +3,7 @@ import { api, ApiError } from '../services/api'
 import { DocumentResponse } from '../types'
 import { UploadDocumentModal } from './UploadDocumentModal'
 import { DeleteDocumentModal } from './DeleteDocumentModal'
+import { AddToCollectionModal } from './AddToCollectionModal'
 
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`
@@ -17,6 +18,8 @@ export const DocumentsView: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false)
   const [documentToDelete, setDocumentToDelete] = useState<DocumentResponse | null>(null)
+  const [documentForCollection, setDocumentForCollection] = useState<DocumentResponse | null>(null)
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
 
   const loadDocuments = async () => {
     setIsLoading(true)
@@ -49,6 +52,21 @@ export const DocumentsView: React.FC = () => {
     setTotal((prev) => Math.max(0, prev - 1))
   }
 
+  const handleRetryDocument = async (docId: string) => {
+    try {
+      await api.documents.retry(docId)
+      setFeedbackMessage('Document ingestion queued for retry.')
+      setTimeout(() => setFeedbackMessage(null), 3000)
+      loadDocuments()
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.detail)
+      } else {
+        setError('Failed to initiate ingestion retry.')
+      }
+    }
+  }
+
   return (
     <div className="view-container">
       <div className="view-header">
@@ -72,8 +90,7 @@ export const DocumentsView: React.FC = () => {
 
       <div className="alert alert-info" role="status">
         <div>
-          <strong>Document Pipeline Notice:</strong> Uploaded papers are stored with status <code>PENDING</code>.
-          Text extraction, chunking, and FAISS vector indexing will be automated in the upcoming ingestion pipeline milestone.
+          <strong>Automated Pipeline:</strong> Uploaded papers are processed asynchronously through PyMuPDF text extraction, 200-token chunking, all-MiniLM-L6-v2 embeddings, and Meta FAISS vector indexing.
         </div>
       </div>
 
@@ -83,6 +100,12 @@ export const DocumentsView: React.FC = () => {
           <button type="button" className="btn-retry" onClick={loadDocuments}>
             Retry
           </button>
+        </div>
+      ) : null}
+
+      {feedbackMessage ? (
+        <div className="alert alert-success" role="status">
+          {feedbackMessage}
         </div>
       ) : null}
 
@@ -143,14 +166,34 @@ export const DocumentsView: React.FC = () => {
                     {new Date(doc.created_at).toLocaleDateString()}
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-xs btn-delete-doc"
-                      onClick={() => setDocumentToDelete(doc)}
-                      aria-label={`Delete ${doc.title || doc.filename}`}
-                    >
-                      Delete
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      {doc.processing_status.toUpperCase() === 'FAILED' && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-xs"
+                          onClick={() => handleRetryDocument(doc.id)}
+                          aria-label={`Retry ingestion for ${doc.title || doc.filename}`}
+                        >
+                          Retry
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-xs btn-add-to-col"
+                        onClick={() => setDocumentForCollection(doc)}
+                        aria-label={`Add ${doc.title || doc.filename} to collection`}
+                      >
+                        + Add to Collection
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-xs btn-delete-doc"
+                        onClick={() => setDocumentToDelete(doc)}
+                        aria-label={`Delete ${doc.title || doc.filename}`}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -170,6 +213,16 @@ export const DocumentsView: React.FC = () => {
         document={documentToDelete}
         onClose={() => setDocumentToDelete(null)}
         onSuccess={handleDocumentDeleted}
+      />
+
+      <AddToCollectionModal
+        isOpen={Boolean(documentForCollection)}
+        document={documentForCollection}
+        onClose={() => setDocumentForCollection(null)}
+        onSuccess={() => {
+          setFeedbackMessage('Document added to collection successfully!')
+          setTimeout(() => setFeedbackMessage(null), 4000)
+        }}
       />
     </div>
   )

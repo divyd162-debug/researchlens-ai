@@ -2,7 +2,8 @@
 import hashlib
 import logging
 from pathlib import Path
-from typing import Any, Optional
+import time
+from typing import Any, Optional, Union
 from uuid import UUID, uuid4
 
 import pymupdf
@@ -169,6 +170,10 @@ class DocumentService:
                     raise InvalidDocumentError("PDF is password-encrypted and cannot be processed.")
                 if doc.page_count == 0:
                     raise InvalidDocumentError("PDF contains 0 pages.")
+                if doc.page_count > settings.MAX_DOCUMENT_PAGES:
+                    raise InvalidDocumentError(
+                        f"Document exceeds maximum allowed limit of {settings.MAX_DOCUMENT_PAGES} pages (got {doc.page_count})."
+                    )
                 page_count = doc.page_count
         except (InvalidDocumentError, DocumentSizeLimitExceededError):
             try:
@@ -428,3 +433,56 @@ class DocumentService:
 
 # Singleton instance
 document_service = DocumentService()
+
+
+def cleanup_stale_temp_files(
+    upload_dir: Optional[Union[str, Path]] = None,
+    max_age_seconds: int = 3600,
+) -> int:
+    """Scans the upload directory and safely cleans up stale temporary upload files.
+
+    Rules:
+    - Only targets regular files ending with the '.tmp' suffix.
+    - Never follows symlinks.
+    - Only removes files whose last modification time (mtime) is older than max_age_seconds (default: 1 hour).
+    - Preserves all .pdf files, .gitkeep, subdirectories, and any unrelated non-.tmp files.
+    - Safely catches any filesystem or permission errors per file, logging them without halting or crashing.
+    - Returns the number of successfully unlinked stale temporary files.
+    """
+    target_dir = Path(upload_dir) if upload_dir is not None else Path(settings.UPLOAD_DIR)
+    if not target_dir.exists() or not target_dir.is_dir():
+        logger.debug("Upload directory '%s' does not exist or is not a directory. Skipping stale cleanup.", target_dir)
+        return 0
+
+    now = time.time()
+    purged_count = 0
+
+    try:
+        entries = list(target_dir.iterdir())
+    except (OSError, PermissionError) as exc:
+        logger.warning("Could not read directory '%s' during stale temp cleanup: %s", target_dir, exc)
+        return 0
+
+    for entry in entries:
+        try:
+            # Strictly ignore symlinks without following them
+            if entry.is_symlink():
+                continue
+
+            # Only inspect regular files ending with .tmp
+            if not entry.is_file() or not entry.name.endswith(".tmp"):
+                continue
+
+            st = entry.stat()
+            age_seconds = now - st.st_mtime
+            if age_seconds > max_age_seconds:
+                entry.unlink()
+                purged_count += 1
+                logger.info("Purged stale temporary upload file '%s' (age: %.1f hours).", entry.name, age_seconds / 3600)
+        except (OSError, PermissionError) as err:
+            logger.warning("Failed to inspect or remove temporary file '%s': %s", entry.name, err)
+
+    if purged_count > 0:
+        logger.info("Stale temporary file cleanup completed: purged %d file(s) from '%s'.", purged_count, target_dir)
+
+    return purged_count

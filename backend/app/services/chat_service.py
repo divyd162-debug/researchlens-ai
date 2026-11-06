@@ -7,6 +7,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 
+from app.core.config import settings
 from app.models.chat import (
     ChatScopeType,
     ChatSession,
@@ -29,6 +30,7 @@ from app.schemas.chat import (
     DocumentScopeSummary,
     MessageCitationResponse,
 )
+from app.schemas.llm import ChatMessageItem
 from app.services.chat_concurrency import (
     ChatConcurrencyManager,
     ChatSessionBusyError,
@@ -443,6 +445,67 @@ class ChatService:
             total=len(items),
         )
 
+    @classmethod
+    def _build_bounded_history(
+        cls,
+        prior_messages: List[Message],
+        max_turns: Optional[int] = None,
+        max_chars: Optional[int] = None,
+    ) -> List[ChatMessageItem]:
+        """Assembles a bounded, chronological window of prior dialogue turns.
+
+        Args:
+            prior_messages: Raw Message ORM instances ordered chronologically.
+            max_turns: Maximum number of messages to retain (default: settings.CHAT_MAX_HISTORY_TURNS).
+            max_chars: Maximum total character budget (default: settings.CHAT_MAX_HISTORY_CHARS).
+
+        Returns:
+            List of ChatMessageItem instances respecting turn and character budgets.
+        """
+        if not prior_messages:
+            return []
+
+        effective_max_turns = max_turns if max_turns is not None else getattr(settings, "CHAT_MAX_HISTORY_TURNS", 10)
+        effective_max_chars = max_chars if max_chars is not None else getattr(settings, "CHAT_MAX_HISTORY_CHARS", 4000)
+
+        # 1. Filter valid non-empty messages and convert to ChatMessageItem
+        items: List[ChatMessageItem] = []
+        for msg in prior_messages:
+            content = str(msg.content or "").strip()
+            if not content:
+                continue
+            role = str(msg.sender_type or "").strip().lower()
+            if role not in ("user", "assistant", "system"):
+                role = "user"
+            items.append(ChatMessageItem(role=role, content=content))
+
+        if not items:
+            return []
+
+        # 2. Slice to most recent effective_max_turns
+        if len(items) > effective_max_turns:
+            items = items[-effective_max_turns:]
+
+        # 3. Enforce character budget from most recent backwards
+        total_chars = sum(len(it.content) for it in items)
+        if total_chars > effective_max_chars:
+            trimmed: List[ChatMessageItem] = []
+            accumulated_chars = 0
+            for it in reversed(items):
+                if accumulated_chars + len(it.content) <= effective_max_chars or not trimmed:
+                    trimmed.append(it)
+                    accumulated_chars += len(it.content)
+                else:
+                    break
+            items = list(reversed(trimmed))
+
+        # 4. Clean turn boundary: if history starts with an isolated assistant message,
+        # prune it so the conversation context starts with a user question (if possible).
+        if len(items) > 1 and items[0].role == "assistant":
+            items = items[1:]
+
+        return items
+
     def post_message_and_respond(
         self,
         db: Session,
@@ -534,7 +597,16 @@ class ChatService:
                         )
                 document_ids = [d.id for d in session_docs]
 
-            # 4. Grounded RAG Query execution (network / LLM call happens outside the write transaction)
+            # 4. Fetch chronological prior dialogue history for this session (bounded)
+            prior_messages = (
+                db.query(Message)
+                .filter(Message.chat_session_id == session.id)
+                .order_by(Message.created_at.asc(), Message.id.asc())
+                .all()
+            )
+            bounded_history = self._build_bounded_history(prior_messages)
+
+            # 5. Grounded RAG Query execution with multi-turn history (network / LLM call happens outside the write transaction)
             t_rag_start = time.monotonic()
             rag_response = rag_service.answer_query(
                 db=db,
@@ -545,10 +617,11 @@ class ChatService:
                 document_ids=document_ids,
                 top_k=request.top_k,
                 similarity_threshold=request.similarity_threshold,
+                conversation_history=bounded_history,
             )
             rag_duration_ms = (time.monotonic() - t_rag_start) * 1000
 
-            # 5. Atomic turn persistence
+            # 6. Atomic turn persistence
             t_persist_start = time.monotonic()
             now = datetime.now(timezone.utc)
             try:

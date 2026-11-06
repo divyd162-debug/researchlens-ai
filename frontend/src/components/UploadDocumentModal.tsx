@@ -119,8 +119,7 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
 
         <div className="alert alert-info">
           <div>
-            <strong>Status Notice:</strong> Uploaded documents will be stored with <code>PENDING</code> status.
-            Text extraction and semantic indexing will be performed in the upcoming ingestion pipeline milestone.
+            <strong>Automated Processing:</strong> Uploaded PDF files are validated and automatically queued for asynchronous text extraction, token-bounded chunking, and FAISS vector indexing.
           </div>
         </div>
 

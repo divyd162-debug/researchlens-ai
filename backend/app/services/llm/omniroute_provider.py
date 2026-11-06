@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.core.config import settings
-from app.schemas.llm import LLMChunkContext, LLMRequest, LLMResponse
+from app.schemas.llm import ChatMessageItem, LLMChunkContext, LLMRequest, LLMResponse
 from app.services.llm.base import BaseLLMProvider
 from app.services.llm.exceptions import (
     LLMConfigurationError,
@@ -265,7 +265,11 @@ class OmniRouteLLMProvider(BaseLLMProvider):
             "   - Avoid rigid template headings, decorative emojis, and repetitive summaries.\n"
             "   - CITATION MARKER PLACEMENT IN MARKDOWN:\n"
             "     * Keep [CHUNK:<id>] tags as regular text outside of code blocks or inline code spans (never write `[CHUNK:1]`). Use standard ASCII square brackets (never unicode lenticular brackets 【】).\n"
-            "     * Attach citation tags directly to the claims, sentences, or table cells they support."
+            "     * Attach citation tags directly to the claims, sentences, or table cells they support.\n"
+            "10. MULTI-TURN DIALOGUE & GROUNDING ISOLATION:\n"
+            "   - When prior conversation turns are provided, use them for dialogue context and resolving pronouns or referents.\n"
+            "   - CRITICAL GROUNDING REQUIREMENT: Previous conversation turns (including previous assistant replies) are NOT primary scientific literature evidence.\n"
+            "   - NEVER cite previous conversation turns as [CHUNK:<id>]. All citations must point exclusively to the explicit EVIDENCE PASSAGES provided for the current turn."
         )
         if custom_instruction and custom_instruction.strip():
             return f"{base_instruction}\n\nAdditional Guidance:\n{custom_instruction.strip()}"
@@ -321,10 +325,16 @@ class OmniRouteLLMProvider(BaseLLMProvider):
         system_instruction = self._build_system_instruction(request.system_instruction)
 
         # Standard OpenAI-compatible chat completions payload
-        messages = [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": user_prompt},
-        ]
+        messages = [{"role": "system", "content": system_instruction}]
+
+        # Inject bounded prior dialogue history turns
+        if request.conversation_history:
+            for turn in request.conversation_history:
+                turn_role = turn.role.lower()
+                if turn_role in ("user", "assistant"):
+                    messages.append({"role": turn_role, "content": turn.content})
+
+        messages.append({"role": "user", "content": user_prompt})
         payload: Dict[str, Any] = {
             "model": self._model_name,
             "messages": messages,
@@ -462,6 +472,113 @@ class OmniRouteLLMProvider(BaseLLMProvider):
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
         )
+
+    def reformulate_query(self, query: str, history: List[ChatMessageItem]) -> str:
+        """Reformulates a conversational follow-up query into a standalone retrieval query via OmniRoute.
+
+        Args:
+            query: The user's latest follow-up question.
+            history: Chronological list of prior conversation turns.
+
+        Returns:
+            Standalone search query containing resolved entities and nouns suitable for vector retrieval.
+        """
+        if not history:
+            return query
+
+        self.validate_configuration()
+
+        history_lines = []
+        for turn in history:
+            role_label = "User" if turn.role.lower() == "user" else "Assistant"
+            content_snippet = turn.content[:350].replace("\n", " ").strip()
+            if content_snippet:
+                history_lines.append(f"{role_label}: {content_snippet}")
+
+        history_text = "\n".join(history_lines)
+
+        reformulation_system = (
+            "You are an academic query reformulator. Your task is to rewrite a follow-up question "
+            "into a single standalone academic search query suitable for dense vector retrieval.\n"
+            "Rules:\n"
+            "1. Resolve pronouns (it, its, they, their, them, this, that, etc.) and anaphoric references using the conversation history.\n"
+            "2. Preserve all specific domain entities, dataset names, model names, and metrics.\n"
+            "3. Return ONLY the rewritten query text. Do NOT include explanations, quotes, preambles, or markdown.\n"
+            "4. If the question is already fully standalone, return it verbatim."
+        )
+
+        user_content = (
+            f"CONVERSATION HISTORY:\n{history_text}\n\n"
+            f"FOLLOW-UP QUESTION:\n{query}\n\n"
+            f"STANDALONE SEARCH QUERY:"
+        )
+
+        messages = [
+            {"role": "system", "content": reformulation_system},
+            {"role": "user", "content": user_content},
+        ]
+        payload: Dict[str, Any] = {
+            "model": self._model_name,
+            "messages": messages,
+            "temperature": 0.0,
+            "max_tokens": 128,
+        }
+        headers: Dict[str, str] = {
+            "Content-Type": "application/json",
+            "User-Agent": "ResearchLensAI/1.0",
+        }
+        if self._api_key and str(self._api_key).strip():
+            headers["Authorization"] = f"Bearer {str(self._api_key).strip()}"
+
+        endpoint_url = f"{self._base_url}/chat/completions"
+        timeout = min(self._timeout_seconds, 15.0)
+
+        t_start = time.monotonic()
+        try:
+            if self._client is not None:
+                resp = self._client.post(
+                    endpoint_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            else:
+                with httpx.Client(timeout=timeout) as client:
+                    resp = client.post(
+                        endpoint_url,
+                        json=payload,
+                        headers=headers,
+                    )
+
+            if resp.status_code != 200:
+                logger.warning(
+                    "OmniRoute query reformulation returned status %d. Falling back to original query.",
+                    resp.status_code,
+                )
+                return query
+
+            data = resp.json()
+            choices = data.get("choices", [])
+            if not choices:
+                return query
+            rewritten = choices[0].get("message", {}).get("content", "").strip()
+            rewritten = rewritten.strip('"\'`')
+            if rewritten:
+                reform_duration_ms = (time.monotonic() - t_start) * 1000
+                logger.info(
+                    "OmniRoute query reformulation succeeded in %.2fms: '%s' -> '%s'",
+                    reform_duration_ms,
+                    query,
+                    rewritten,
+                )
+                return rewritten
+            return query
+        except Exception as exc:
+            logger.warning(
+                "OmniRoute query reformulation failed (%s). Falling back to original query.",
+                _sanitize_error_message(str(exc), self._api_key),
+            )
+            return query
 
     def _handle_transport_exception(self, exc: Exception, duration_ms: float = 0.0) -> None:
         """Handles low-level socket, connection, and timeout exceptions."""

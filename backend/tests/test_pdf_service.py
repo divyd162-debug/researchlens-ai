@@ -7,6 +7,7 @@ from app.services.pdf_service import (
     PDFService,
     PDFFileNotFoundError,
     InvalidPDFError,
+    PDFPageLimitExceededError,
     PDFExtractionError,
 )
 
@@ -155,3 +156,20 @@ class TestPDFServiceErrors:
         with pytest.raises(InvalidPDFError) as exc_info:
             pdf_service.extract_text(corrupted_file)
         assert "PyMuPDF could not parse" in str(exc_info.value) or "magic bytes" in str(exc_info.value)
+
+    def test_extract_within_max_pages_limit(
+        self, tmp_path: Path, pdf_service: PDFService
+    ):
+        """Verifies that PDF with page count <= max_pages extracts successfully."""
+        pdf_path = create_sample_pdf(tmp_path / "three_pages.pdf", ["Page 1", "Page 2", "Page 3"])
+        result = pdf_service.extract_text(pdf_path, max_pages=3)
+        assert result.total_pages == 3
+
+    def test_extract_exceeding_max_pages_limit_raises_error(
+        self, tmp_path: Path, pdf_service: PDFService
+    ):
+        """Verifies that PDF with page count > max_pages raises PDFPageLimitExceededError."""
+        pdf_path = create_sample_pdf(tmp_path / "four_pages.pdf", ["Page 1", "Page 2", "Page 3", "Page 4"])
+        with pytest.raises(PDFPageLimitExceededError) as exc_info:
+            pdf_service.extract_text(pdf_path, max_pages=3)
+        assert "exceeds maximum allowed limit of 3 pages" in str(exc_info.value)

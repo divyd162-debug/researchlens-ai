@@ -1,6 +1,7 @@
 """Abstract base class for LLM providers in ResearchLens AI."""
 from abc import ABC, abstractmethod
-from app.schemas.llm import LLMRequest, LLMResponse
+from typing import List
+from app.schemas.llm import ChatMessageItem, LLMRequest, LLMResponse
 
 
 class BaseLLMProvider(ABC):
@@ -37,6 +38,19 @@ class BaseLLMProvider(ABC):
             LLMQuotaExceededError: If rate limits or quota are exhausted.
             LLMProviderError: If the provider fails to generate a completion.
             LLMConfigurationError: If the provider is misconfigured or lacks valid credentials.
+        """
+        pass
+
+    @abstractmethod
+    def reformulate_query(self, query: str, history: List[ChatMessageItem]) -> str:
+        """Reformulates a conversational follow-up query into a standalone retrieval query.
+
+        Args:
+            query: The user's latest follow-up question.
+            history: Chronological list of prior conversation turns.
+
+        Returns:
+            Standalone search query containing resolved entities and nouns suitable for vector retrieval.
         """
         pass
 

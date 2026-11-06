@@ -49,6 +49,11 @@ class InvalidPDFError(PDFExtractionError):
     pass
 
 
+class PDFPageLimitExceededError(InvalidPDFError):
+    """Raised when PDF page count exceeds the configured maximum page limit."""
+    pass
+
+
 class EncryptedPDFError(PDFExtractionError):
     """Raised when the PDF is password-protected or encrypted."""
     pass
@@ -85,11 +90,14 @@ class PDFService:
 
         return path
 
-    def extract_text(self, file_path: Union[str, Path]) -> PDFExtractionResult:
+    def extract_text(
+        self, file_path: Union[str, Path], max_pages: Union[int, None] = None
+    ) -> PDFExtractionResult:
         """Extracts text page-by-page from the provided PDF file path.
 
         Args:
             file_path: Absolute or relative path to the target PDF file.
+            max_pages: Optional maximum allowable page count. If exceeded, raises PDFPageLimitExceededError.
 
         Returns:
             PDFExtractionResult containing total page count and ordered ExtractedPage items.
@@ -97,6 +105,7 @@ class PDFService:
         Raises:
             PDFFileNotFoundError: If the file does not exist.
             InvalidPDFError: If the file is not a valid PDF, has no pages, or is corrupt.
+            PDFPageLimitExceededError: If the PDF exceeds max_pages.
             EncryptedPDFError: If the PDF is encrypted and requires a password.
             PDFExtractionError: For unexpected extraction failures.
         """
@@ -112,6 +121,11 @@ class PDFService:
 
                 if doc.page_count == 0:
                     raise InvalidPDFError(f"PDF contains 0 pages: {validated_path.name}")
+
+                if max_pages is not None and doc.page_count > max_pages:
+                    raise PDFPageLimitExceededError(
+                        f"PDF page count ({doc.page_count}) exceeds maximum allowed limit of {max_pages} pages: {validated_path.name}"
+                    )
 
                 pages: List[ExtractedPage] = []
                 for page_idx in range(doc.page_count):

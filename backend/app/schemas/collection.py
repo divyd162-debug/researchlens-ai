@@ -114,3 +114,35 @@ class MessageResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     message: str = Field(..., description="Status or result message")
+
+
+class AddDocumentsToCollectionRequest(BaseModel):
+    """Payload for associating one or more documents with a collection."""
+    model_config = ConfigDict(frozen=True)
+
+    document_ids: List[UUID] = Field(
+        default_factory=list,
+        description="One or more document IDs to associate with the collection",
+    )
+    document_id: Optional[UUID] = Field(
+        default=None,
+        description="Single document ID (convenience alternative to document_ids)",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_document_ids(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            doc_id = data.get("document_id")
+            doc_ids = data.get("document_ids")
+            if doc_id and not doc_ids:
+                data = dict(data)
+                data["document_ids"] = [doc_id]
+        return data
+
+    @field_validator("document_ids")
+    @classmethod
+    def validate_non_empty_ids(cls, v: List[UUID]) -> List[UUID]:
+        if not v:
+            raise ValueError("At least one document ID must be provided.")
+        return v

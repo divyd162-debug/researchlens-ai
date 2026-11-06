@@ -1,6 +1,6 @@
 """Deterministic Mock LLM Provider for ResearchLens AI."""
-from typing import Any, Optional
-from app.schemas.llm import LLMRequest, LLMResponse
+from typing import Any, Callable, List, Optional
+from app.schemas.llm import ChatMessageItem, LLMRequest, LLMResponse
 from app.services.llm.base import BaseLLMProvider
 from app.services.llm.exceptions import (
     LLMConfigurationError,
@@ -32,6 +32,7 @@ class MockLLMProvider(BaseLLMProvider):
         self,
         model_name: str = "mock-model-v1",
         simulate_error: Optional[Any] = None,
+        custom_reformulate_fn: Optional[Callable[[str, List[ChatMessageItem]], str]] = None,
     ):
         """Initializes the mock provider with configurable model name and error simulation.
 
@@ -39,9 +40,11 @@ class MockLLMProvider(BaseLLMProvider):
             model_name: Identifier for the simulated model.
             simulate_error: Optional error trigger ('quota', 'context_limit', 'provider',
                             'config', or an Exception instance/class).
+            custom_reformulate_fn: Optional callable for custom query reformulation behavior in tests.
         """
         self._model_name = model_name
         self.simulate_error = simulate_error
+        self.custom_reformulate_fn = custom_reformulate_fn
 
     @property
     def provider_name(self) -> str:
@@ -78,6 +81,38 @@ class MockLLMProvider(BaseLLMProvider):
             raise LLMConfigurationError("Mock provider simulated configuration failure.")
 
         raise LLMProviderError(f"Mock provider simulated generic failure: {self.simulate_error}")
+
+    def reformulate_query(self, query: str, history: List[ChatMessageItem]) -> str:
+        """Deterministic query reformulation for offline testing and development."""
+        self._handle_simulated_error()
+
+        if not history:
+            return query
+
+        if self.custom_reformulate_fn is not None:
+            return self.custom_reformulate_fn(query, history)
+
+        query_clean = str(query).strip()
+        query_lower = query_clean.lower()
+        referential_tokens = ["it", "its", "they", "their", "them", "this", "that", "these", "those"]
+        has_referential = any(
+            token in query_lower.split() or f"{token}'s" in query_lower
+            for token in referential_tokens
+        )
+        if not has_referential:
+            return query_clean
+
+        # Extract context topic from latest user or assistant message
+        last_subject = None
+        for turn in reversed(history):
+            content = turn.content.strip()
+            if content:
+                last_subject = content.split(".")[0].strip()
+                break
+
+        if last_subject:
+            return f"{query_clean} [context: {last_subject[:40]}]"
+        return query_clean
 
     def generate(self, request: LLMRequest) -> LLMResponse:
         """Generates a deterministic completion for the provided request.

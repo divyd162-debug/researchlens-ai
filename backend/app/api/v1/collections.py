@@ -6,14 +6,18 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
 from app.schemas.collection import (
+    AddDocumentsToCollectionRequest,
     CollectionCreateRequest,
     CollectionListResponse,
     CollectionResponse,
     CollectionUpdateRequest,
     MessageResponse,
 )
+from app.schemas.document import DocumentListResponse
 from app.services.collection_service import (
+    AssociationNotFoundError,
     CollectionNotFoundError,
+    DocumentNotFoundError,
     DuplicateCollectionNameError,
     InvalidCollectionNameError,
     collection_service,
@@ -159,6 +163,112 @@ def delete_collection(
             collection_id=id,
         )
         return MessageResponse(message="Collection deleted successfully")
+    except CollectionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/{id}/documents",
+    response_model=CollectionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Add documents to collection",
+    description="Associates one or more documents owned by the caller with the specified collection.",
+)
+def add_documents_to_collection(
+    id: UUID,
+    request: AddDocumentsToCollectionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CollectionResponse:
+    """Associates one or more documents with an owned collection."""
+    try:
+        return collection_service.add_documents_to_collection(
+            db=db,
+            owner_id=current_user.id,
+            collection_id=id,
+            request=request,
+        )
+    except CollectionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.delete(
+    "/{id}/documents/{document_id}",
+    response_model=CollectionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Remove document from collection",
+    description="Disassociates a document from the collection without deleting the underlying document.",
+)
+def remove_document_from_collection(
+    id: UUID,
+    document_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CollectionResponse:
+    """Removes a document from an owned collection."""
+    try:
+        return collection_service.remove_document_from_collection(
+            db=db,
+            owner_id=current_user.id,
+            collection_id=id,
+            document_id=document_id,
+        )
+    except CollectionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except AssociationNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/{id}/documents",
+    response_model=DocumentListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List collection documents",
+    description="Returns a paginated list of documents that belong to this collection.",
+)
+def list_collection_documents(
+    id: UUID,
+    limit: int = Query(default=50, ge=1, le=100, description="Page limit"),
+    offset: int = Query(default=0, ge=0, description="Page offset"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DocumentListResponse:
+    """Lists member documents of an owned collection."""
+    try:
+        return collection_service.list_collection_documents(
+            db=db,
+            owner_id=current_user.id,
+            collection_id=id,
+            limit=limit,
+            offset=offset,
+        )
     except CollectionNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

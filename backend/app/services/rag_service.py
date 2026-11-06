@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.chat import ChatScopeType
-from app.schemas.llm import LLMChunkContext, LLMRequest
+from app.schemas.llm import ChatMessageItem, LLMChunkContext, LLMRequest
 from app.schemas.rag import (
     RAGQueryRequest,
     RAGResponse,
@@ -79,6 +79,39 @@ class RAGService:
             vector_store=vector_store,
         )
 
+    def reformulate_query_for_retrieval(
+        self,
+        query: str,
+        conversation_history: Optional[List[ChatMessageItem]],
+    ) -> str:
+        """Derives a standalone retrieval query using conversation history for vector search.
+
+        Bypasses reformulation if history is empty (0 extra LLM calls).
+        Gracefully falls back to original query if reformulation fails.
+        """
+        if not conversation_history:
+            return query
+
+        try:
+            rewritten = self.llm_provider.reformulate_query(query, conversation_history)
+            cleaned = str(rewritten).strip().strip('"\'`')
+            if cleaned:
+                logger.info(
+                    "Contextual retrieval query reformulation: '%s' -> '%s'",
+                    query,
+                    cleaned,
+                )
+                return cleaned
+            return query
+        except Exception as exc:
+            logger.warning(
+                "Contextual query reformulation failed (%s: %s). Falling back to original query: '%s'",
+                type(exc).__name__,
+                exc,
+                query,
+            )
+            return query
+
     def answer_query(
         self,
         db: Session,
@@ -89,6 +122,7 @@ class RAGService:
         document_ids: Optional[List[UUID]] = None,
         top_k: int = 5,
         similarity_threshold: float = 0.0,
+        conversation_history: Optional[List[ChatMessageItem]] = None,
     ) -> RAGResponse:
         """Executes an end-to-end grounded RAG search and generation workflow.
 
@@ -113,12 +147,17 @@ class RAGService:
         scope_str = scope_type.value if hasattr(scope_type, "value") else str(scope_type)
         t_rag_start = time.monotonic()
 
+        # Multi-turn contextual query reformulation (Stage 2)
+        retrieval_query = cleaned_query
+        if conversation_history:
+            retrieval_query = self.reformulate_query_for_retrieval(cleaned_query, conversation_history)
+
         # Delegate retrieval and authorization to RetrievalService
         try:
             t_retrieval_start = time.monotonic()
             top_contexts = self.retrieval_service.retrieve_relevant_chunks(
                 db=db,
-                query=query,
+                query=retrieval_query,
                 user_id=user_id,
                 scope_type=scope_type,
                 scope_id=scope_id,
@@ -181,6 +220,7 @@ class RAGService:
         llm_request = LLMRequest(
             prompt=cleaned_query,
             context_chunks=llm_chunk_contexts,
+            conversation_history=conversation_history or [],
         )
         prompt_duration_ms = (time.monotonic() - t_prompt_start) * 1000
 
